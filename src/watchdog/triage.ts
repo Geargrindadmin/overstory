@@ -2,21 +2,23 @@
  * Tier 1 AI-assisted failure classification for stalled agents.
  *
  * When an agent is detected as stalled, triage reads recent log entries and
- * uses Claude to classify the situation as recoverable, fatal, or long-running.
- * Falls back to "extend" if Claude is unavailable.
+ * uses AI to classify the situation as recoverable, fatal, or long-running.
+ * Falls back to "extend" if AI provider is unavailable.
  */
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AgentError } from "../errors.ts";
+import { resolveAIProvider } from "../aiprovider.ts";
+import { loadConfig, resolveProjectRoot } from "../config.ts";
 
 /**
- * Triage a stalled agent by analyzing its recent log output with Claude.
+ * Triage a stalled agent by analyzing its recent log output with AI.
  *
  * Steps:
  * 1. Find the most recent session log directory for the agent
  * 2. Read the last 50 lines of session.log
- * 3. Ask Claude to classify the situation
+ * 3. Ask AI to classify the situation
  * 4. Parse the response to determine action
  *
  * @param options.agentName - Name of the agent to triage
@@ -28,7 +30,7 @@ export async function triageAgent(options: {
 	agentName: string;
 	root: string;
 	lastActivity: string;
-	/** Timeout in ms for the Claude subprocess. Defaults to 30_000 (30s). */
+	/** Timeout in ms for the AI subprocess. Defaults to 30_000 (30s). */
 	timeoutMs?: number;
 }): Promise<"retry" | "terminate" | "extend"> {
 	const { agentName, root, lastActivity, timeoutMs } = options;
@@ -45,7 +47,17 @@ export async function triageAgent(options: {
 	const prompt = buildTriagePrompt(agentName, lastActivity, logContent);
 
 	try {
-		const response = await spawnClaude(prompt, timeoutMs);
+		// Resolve AI provider for non-interactive triage
+		let aiCommand = "claude"; // Default fallback
+		try {
+			const projectRoot = await resolveProjectRoot(root);
+			const config = await loadConfig(projectRoot);
+			const aiProvider = await resolveAIProvider(config.aiprovider);
+			aiCommand = aiProvider.cliConfig.command;
+		} catch {
+			// If config resolution fails, fall back to claude
+		}
+		const response = await spawnAI(aiCommand, prompt, timeoutMs);
 		return classifyResponse(response);
 	} catch {
 		// Claude not available — default to extend (safe fallback)
@@ -119,21 +131,27 @@ export function buildTriagePrompt(
 	].join("\n");
 }
 
-/** Default timeout for Claude subprocess: 30 seconds */
+/** Default timeout for AI subprocess: 30 seconds */
 const DEFAULT_TRIAGE_TIMEOUT_MS = 30_000;
 
 /**
- * Spawn Claude in non-interactive mode to analyze the log.
+ * Spawn AI in non-interactive mode to analyze the log.
  *
+ * @param command - The AI CLI command (e.g., "claude" or "kimi")
  * @param prompt - The analysis prompt
  * @param timeoutMs - Timeout in ms for the subprocess (default 30s)
- * @returns Claude's response text
- * @throws Error if claude is not installed, the process fails, or the timeout is reached
+ * @returns AI's response text
+ * @throws Error if AI CLI is not installed, the process fails, or the timeout is reached
  */
-async function spawnClaude(prompt: string, timeoutMs?: number): Promise<string> {
+async function spawnAI(command: string, prompt: string, timeoutMs?: number): Promise<string> {
 	const timeout = timeoutMs ?? DEFAULT_TRIAGE_TIMEOUT_MS;
 
-	const proc = Bun.spawn(["claude", "--print", "-p", prompt], {
+	// Build provider-specific non-interactive command
+	const args = command === "kimi"
+		? [command, "--print", "-p", prompt]  // Kimi uses --print -p
+		: [command, "--print", "-p", prompt]; // Claude uses --print -p (same)
+
+	const proc = Bun.spawn(args, {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -148,7 +166,7 @@ async function spawnClaude(prompt: string, timeoutMs?: number): Promise<string> 
 
 		if (exitCode !== 0) {
 			const stderr = await new Response(proc.stderr).text();
-			throw new AgentError(`Claude triage failed (exit ${exitCode}): ${stderr.trim()}`);
+			throw new AgentError(`AI triage failed (exit ${exitCode}): ${stderr.trim()}`);
 		}
 
 		return stdout.trim();
@@ -158,9 +176,9 @@ async function spawnClaude(prompt: string, timeoutMs?: number): Promise<string> 
 }
 
 /**
- * Classify Claude's response into a triage action.
+ * Classify AI response into a triage action.
  *
- * @param response - Claude's raw response text
+ * @param response - AI's raw response text
  * @returns "retry" | "terminate" | "extend"
  */
 export function classifyResponse(response: string): "retry" | "terminate" | "extend" {

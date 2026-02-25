@@ -27,8 +27,8 @@ const CLAUDE_CLI_CONFIG: AgentCLIConfig = {
 /** Kimi Code CLI configuration */
 const KIMI_CLI_CONFIG: AgentCLIConfig = {
 	command: "kimi",
-	modelFlag: null, // Kimi doesn't use --model flag, uses KIMI_API_KEY
-	skipPermissionsFlag: null,
+	modelFlag: "--model", // Kimi supports --model flag
+	skipPermissionsFlag: "--yolo", // Kimi uses --yolo for auto-approve
 	apiKeyEnvVar: "KIMI_API_KEY",
 	configDir: ".kimi",
 	instructionsFile: "KIMI.md",

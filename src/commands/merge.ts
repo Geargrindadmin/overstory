@@ -194,6 +194,7 @@ export async function mergeCommand(args: string[]): Promise<void> {
 		aiResolveEnabled: config.merge.aiResolveEnabled,
 		reimagineEnabled: config.merge.reimagineEnabled,
 		mulchClient,
+		aiprovider: config.aiprovider,
 	});
 
 	if (branchName) {

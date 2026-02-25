@@ -15,7 +15,12 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { deployHooks } from "../agents/hooks-deployer.ts";
+import {
+	buildSpawnCommand,
+	getProviderEnv,
+	resolveAIProvider,
+} from "../aiprovider.ts";
+import { deployHooks, deployHooksForProvider } from "../agents/hooks-deployer.ts";
 import { createIdentity, loadIdentity } from "../agents/identity.ts";
 import { createManifestLoader, resolveModel } from "../agents/manifest.ts";
 import { loadConfig } from "../config.ts";
@@ -38,7 +43,7 @@ function monitorTmuxSession(projectName: string): string {
 
 /**
  * Build the monitor startup beacon — the first message sent to the monitor
- * via tmux send-keys after Claude Code initializes.
+ * via tmux send-keys after the AI agent initializes.
  */
 export function buildMonitorBeacon(): string {
 	const timestamp = new Date().toISOString();
@@ -137,27 +142,45 @@ async function startMonitor(args: string[]): Promise<void> {
 			});
 		}
 
-		// Resolve model from config > manifest > fallback
+		// Resolve AI provider and model
+		const aiProvider = await resolveAIProvider(config.aiprovider);
 		const manifestLoader = createManifestLoader(
 			join(projectRoot, config.agents.manifestPath),
 			join(projectRoot, config.agents.baseDir),
 		);
 		const manifest = await manifestLoader.load();
-		const { model, env } = resolveModel(config, manifest, "monitor", "sonnet");
+		const { model: resolvedModel, env: modelEnv } = resolveModel(
+			config,
+			manifest,
+			"monitor",
+			"sonnet",
+		);
 
-		// Spawn tmux session at project root with Claude Code (interactive mode).
-		// Inject the monitor base definition via --append-system-prompt.
+		// Build base spawn command
+		const modelToUse =
+			resolvedModel === "sonnet" || resolvedModel === "opus" || resolvedModel === "haiku"
+				? resolvedModel
+				: aiProvider.model;
 		const agentDefPath = join(projectRoot, ".overstory", "agent-defs", "monitor.md");
 		const agentDefFile = Bun.file(agentDefPath);
-		let claudeCmd = `claude --model ${model} --dangerously-skip-permissions`;
+		let spawnCmd = buildSpawnCommand(aiProvider.cliConfig, modelToUse);
+
+		// Inject the monitor base definition via provider-specific mechanism
 		if (await agentDefFile.exists()) {
-			const agentDef = await agentDefFile.text();
-			const escaped = agentDef.replace(/'/g, "'\\''");
-			claudeCmd += ` --append-system-prompt '${escaped}'`;
+			if (aiProvider.provider === "claude") {
+				const agentDef = await agentDefFile.text();
+				const escaped = agentDef.replace(/'/g, "'\\''");
+				spawnCmd += ` --append-system-prompt '${escaped}'`;
+			} else if (aiProvider.provider === "kimi") {
+				spawnCmd += ` --agent-file '${agentDefPath}'`;
+			}
 		}
-		const pid = await createSession(tmuxSession, projectRoot, claudeCmd, {
-			...env,
+
+		const pid = await createSession(tmuxSession, projectRoot, spawnCmd, {
+			...modelEnv,
+			...getProviderEnv(aiProvider.cliConfig),
 			OVERSTORY_AGENT_NAME: MONITOR_NAME,
+			OVERSTORY_AI_PROVIDER: aiProvider.provider,
 		});
 
 		// Record session BEFORE sending the beacon so that hook-triggered

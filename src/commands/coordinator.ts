@@ -14,7 +14,12 @@
 
 import { mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { deployHooks } from "../agents/hooks-deployer.ts";
+import {
+	buildSpawnCommand,
+	getProviderEnv,
+	resolveAIProvider,
+} from "../aiprovider.ts";
+import { deployHooks, deployHooksForProvider } from "../agents/hooks-deployer.ts";
 import { createIdentity, loadIdentity } from "../agents/identity.ts";
 import { createManifestLoader, resolveModel } from "../agents/manifest.ts";
 import { loadConfig } from "../config.ts";
@@ -323,13 +328,21 @@ async function startCoordinator(args: string[], deps: CoordinatorDeps = {}): Pro
 			store.updateState(COORDINATOR_NAME, "completed");
 		}
 
+		// Resolve AI provider early (needed for hooks deployment)
+		const aiProvider = await resolveAIProvider(config.aiprovider);
+
 		// Deploy hooks to the project root so the coordinator gets event logging,
 		// mail check --inject, and activity tracking via the standard hook pipeline.
 		// The ENV_GUARD prefix on all hooks (both template and generated guards)
 		// ensures they only activate when OVERSTORY_AGENT_NAME is set (i.e. for
-		// the coordinator's tmux session), so the user's own Claude Code session
+		// the coordinator's tmux session), so the user's own AI agent session
 		// at the project root is unaffected.
-		await deployHooks(projectRoot, COORDINATOR_NAME, "coordinator");
+		// Deploy hooks only if provider supports them
+		if (aiProvider.cliConfig.supportsHooks) {
+			await deployHooks(projectRoot, COORDINATOR_NAME, "coordinator");
+		} else {
+			await deployHooksForProvider(projectRoot, COORDINATOR_NAME, "coordinator", aiProvider.provider);
+		}
 
 		// Create coordinator identity if first run
 		const identityBaseDir = join(projectRoot, ".overstory", "agents");
@@ -345,31 +358,47 @@ async function startCoordinator(args: string[], deps: CoordinatorDeps = {}): Pro
 				recentTasks: [],
 			});
 		}
-
-		// Resolve model from config > manifest > fallback
 		const manifestLoader = createManifestLoader(
 			join(projectRoot, config.agents.manifestPath),
 			join(projectRoot, config.agents.baseDir),
 		);
 		const manifest = await manifestLoader.load();
-		const { model, env } = resolveModel(config, manifest, "coordinator", "opus");
+		const { model: resolvedModel, env: modelEnv } = resolveModel(
+			config,
+			manifest,
+			"coordinator",
+			"opus",
+		);
 
-		// Spawn tmux session at project root with Claude Code (interactive mode).
-		// Inject the coordinator base definition via --append-system-prompt so the
-		// coordinator knows its role, hierarchy rules, and delegation patterns
-		// (overstory-gaio, overstory-0kwf).
+		// Build base spawn command
+		const modelToUse =
+			resolvedModel === "sonnet" || resolvedModel === "opus" || resolvedModel === "haiku"
+				? resolvedModel
+				: aiProvider.model;
+		let spawnCmd = buildSpawnCommand(aiProvider.cliConfig, modelToUse);
+
+		// Inject the coordinator base definition via provider-specific mechanism
+		// Claude: --append-system-prompt
+		// Kimi: --agent-file (much cleaner!)
 		const agentDefPath = join(projectRoot, ".overstory", "agent-defs", "coordinator.md");
 		const agentDefFile = Bun.file(agentDefPath);
-		let claudeCmd = `claude --model ${model} --dangerously-skip-permissions`;
 		if (await agentDefFile.exists()) {
-			const agentDef = await agentDefFile.text();
-			// Single-quote the content for safe shell expansion (only escape single quotes)
-			const escaped = agentDef.replace(/'/g, "'\\''");
-			claudeCmd += ` --append-system-prompt '${escaped}'`;
+			if (aiProvider.provider === "claude") {
+				const agentDef = await agentDefFile.text();
+				// Single-quote the content for safe shell expansion (only escape single quotes)
+				const escaped = agentDef.replace(/'/g, "'\\''");
+				spawnCmd += ` --append-system-prompt '${escaped}'`;
+			} else if (aiProvider.provider === "kimi") {
+				// For Kimi, use --agent-file which is cleaner than embedding
+				spawnCmd += ` --agent-file '${agentDefPath}'`;
+			}
 		}
-		const pid = await tmux.createSession(tmuxSession, projectRoot, claudeCmd, {
-			...env,
+
+		const pid = await tmux.createSession(tmuxSession, projectRoot, spawnCmd, {
+			...modelEnv,
+			...getProviderEnv(aiProvider.cliConfig),
 			OVERSTORY_AGENT_NAME: COORDINATOR_NAME,
+			OVERSTORY_AI_PROVIDER: aiProvider.provider,
 		});
 
 		// Record session BEFORE sending the beacon so that hook-triggered

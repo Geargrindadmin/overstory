@@ -21,11 +21,11 @@ describe("buildSpawnCommand", () => {
 		expect(result).toBe("claude --model sonnet --dangerously-skip-permissions");
 	});
 
-	it("should build Kimi command without model flag", () => {
+	it("should build Kimi command with model flag", () => {
 		const cliConfig = {
 			command: "kimi",
-			modelFlag: null,
-			skipPermissionsFlag: null,
+			modelFlag: "--model",
+			skipPermissionsFlag: "--yolo",
 			apiKeyEnvVar: "KIMI_API_KEY",
 			configDir: ".kimi",
 			instructionsFile: "KIMI.md",
@@ -33,7 +33,7 @@ describe("buildSpawnCommand", () => {
 			supportsHooks: false,
 		};
 		const result = buildSpawnCommand(cliConfig, "kimi-k2.5");
-		expect(result).toBe("kimi");
+		expect(result).toBe("kimi --model kimi-k2.5 --yolo");
 	});
 });
 

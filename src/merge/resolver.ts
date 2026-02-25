@@ -4,7 +4,7 @@
  * Implements a 4-tier escalation strategy:
  *   1. Clean merge — git merge with no conflicts
  *   2. Auto-resolve — parse conflict markers, keep incoming (agent) changes
- *   3. AI-resolve — use Claude to resolve remaining conflicts
+ *   3. AI-resolve — use AI to resolve remaining conflicts
  *   4. Re-imagine — abort merge and reimplement changes from scratch
  *
  * Each tier is attempted in order. If a tier fails, the next is tried.
@@ -19,7 +19,9 @@ import type {
 	MergeResult,
 	ParsedConflictPattern,
 	ResolutionTier,
+	AIProviderConfig,
 } from "../types.ts";
+import { resolveAIProvider } from "../aiprovider.ts";
 
 export interface MergeResolver {
 	/** Attempt to merge the entry's branch into the canonical branch with tiered resolution. */
@@ -191,16 +193,26 @@ export function looksLikeProse(text: string): boolean {
 }
 
 /**
- * Tier 3: AI-assisted conflict resolution using Claude.
- * Spawns `claude --print` for each conflicted file with the conflict content.
+ * Tier 3: AI-assisted conflict resolution using AI provider.
+ * Spawns AI CLI in non-interactive mode for each conflicted file.
  * Validates that output looks like code, not conversational prose.
  */
 async function tryAiResolve(
 	conflictFiles: string[],
 	repoRoot: string,
+	aiprovider?: AIProviderConfig,
 	pastResolutions?: string[],
 ): Promise<{ success: boolean; remainingConflicts: string[] }> {
 	const remainingConflicts: string[] = [];
+
+	// Resolve AI provider (fallback to claude if config unavailable)
+	let aiCommand = "claude";
+	try {
+		const aiProvider = await resolveAIProvider(aiprovider);
+		aiCommand = aiProvider.cliConfig.command;
+	} catch {
+		// If provider resolution fails, fall back to claude
+	}
 
 	for (const file of conflictFiles) {
 		const filePath = `${repoRoot}/${file}`;
@@ -221,7 +233,7 @@ async function tryAiResolve(
 				content,
 			].join(" ");
 
-			const proc = Bun.spawn(["claude", "--print", "-p", prompt], {
+			const proc = Bun.spawn([aiCommand, "--print", "-p", prompt], {
 				cwd: repoRoot,
 				stdout: "pipe",
 				stderr: "pipe",
@@ -265,13 +277,22 @@ async function tryAiResolve(
 
 /**
  * Tier 4: Re-imagine — abort the merge and reimplement changes from scratch.
- * Uses Claude to reimplement the agent's changes on top of the canonical version.
+ * Uses AI to reimplement the agent's changes on top of the canonical version.
  */
 async function tryReimagine(
 	entry: MergeEntry,
 	canonicalBranch: string,
 	repoRoot: string,
+	aiprovider?: AIProviderConfig,
 ): Promise<{ success: boolean }> {
+	// Resolve AI provider (fallback to claude if config unavailable)
+	let aiCommand = "claude";
+	try {
+		const aiProvider = await resolveAIProvider(aiprovider);
+		aiCommand = aiProvider.cliConfig.command;
+	} catch {
+		// If provider resolution fails, fall back to claude
+	}
 	// Abort the current merge
 	await runGit(repoRoot, ["merge", "--abort"]);
 
@@ -304,7 +325,7 @@ async function tryReimagine(
 				branchContent,
 			].join("");
 
-			const proc = Bun.spawn(["claude", "--print", "-p", prompt], {
+			const proc = Bun.spawn([aiCommand, "--print", "-p", prompt], {
 				cwd: repoRoot,
 				stdout: "pipe",
 				stderr: "pipe",
@@ -507,11 +528,13 @@ function recordConflictPattern(
  * @param options.aiResolveEnabled - Enable tier 3 (AI-assisted resolution)
  * @param options.reimagineEnabled - Enable tier 4 (full reimagine)
  * @param options.mulchClient - Optional MulchClient for conflict pattern recording
+ * @param options.aiprovider - AI provider configuration for non-interactive resolution
  */
 export function createMergeResolver(options: {
 	aiResolveEnabled: boolean;
 	reimagineEnabled: boolean;
 	mulchClient?: MulchClient;
+	aiprovider?: AIProviderConfig;
 }): MergeResolver {
 	return {
 		async resolve(
@@ -588,7 +611,7 @@ export function createMergeResolver(options: {
 			// Tier 3: AI-resolve
 			if (options.aiResolveEnabled && !history.skipTiers.includes("ai-resolve")) {
 				lastTier = "ai-resolve";
-				const aiResult = await tryAiResolve(conflictFiles, repoRoot, history.pastResolutions);
+				const aiResult = await tryAiResolve(conflictFiles, repoRoot, options.aiprovider, history.pastResolutions);
 				if (aiResult.success) {
 					if (options.mulchClient) {
 						recordConflictPattern(options.mulchClient, entry, "ai-resolve", conflictFiles, true);
@@ -607,7 +630,7 @@ export function createMergeResolver(options: {
 			// Tier 4: Re-imagine
 			if (options.reimagineEnabled && !history.skipTiers.includes("reimagine")) {
 				lastTier = "reimagine";
-				const reimagineResult = await tryReimagine(entry, canonicalBranch, repoRoot);
+				const reimagineResult = await tryReimagine(entry, canonicalBranch, repoRoot, options.aiprovider);
 				if (reimagineResult.success) {
 					if (options.mulchClient) {
 						recordConflictPattern(options.mulchClient, entry, "reimagine", conflictFiles, true);
