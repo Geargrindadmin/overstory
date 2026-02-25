@@ -43,7 +43,7 @@ import { setQuiet } from "./logging/color.ts";
 
 const VERSION = "0.6.2";
 
-const HELP = `overstory v${VERSION} — Multi-agent orchestration for Claude Code
+const HELP = `overstory v${VERSION} — Multi-agent orchestration for AI agents (Claude Code, Kimi Code, etc.)
 
 Usage: overstory <command> [args...]
 

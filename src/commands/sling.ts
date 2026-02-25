@@ -128,7 +128,7 @@ export interface BeaconOptions {
 /**
  * Build a structured startup beacon for an agent.
  *
- * The beacon is the first user message sent to a Claude Code agent via
+ * The beacon is the first user message sent to an AI agent via
  * tmux send-keys. It provides identity context and a numbered startup
  * protocol so the agent knows exactly what to do on boot.
  *
@@ -136,7 +136,7 @@ export interface BeaconOptions {
  *   [OVERSTORY] <agent-name> (<capability>) <ISO timestamp> task:<bead-id>
  *   Depth: <n> | Parent: <parent-name|none>
  *   Startup protocol:
- *   1. Read your assignment in .claude/CLAUDE.md
+ *   1. Read your assignment in your overlay file (.claude/CLAUDE.md or .kimi/KIMI.md)
  *   2. Load expertise: mulch prime
  *   3. Check mail: overstory mail check --agent <name>
  *   4. Begin working on task <bead-id>
@@ -147,7 +147,7 @@ export function buildBeacon(opts: BeaconOptions): string {
 	const parts = [
 		`[OVERSTORY] ${opts.agentName} (${opts.capability}) ${timestamp} task:${opts.taskId}`,
 		`Depth: ${opts.depth} | Parent: ${parent}`,
-		`Startup: read .claude/CLAUDE.md, run mulch prime, check mail (overstory mail check --agent ${opts.agentName}), then begin task ${opts.taskId}`,
+		`Startup: read your overlay file, run mulch prime, check mail (overstory mail check --agent ${opts.agentName}), then begin task ${opts.taskId}`,
 	];
 	return parts.join(" — ");
 }

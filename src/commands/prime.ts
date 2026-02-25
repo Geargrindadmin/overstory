@@ -154,7 +154,7 @@ async function healGitignore(overstoryDir: string): Promise<void> {
  * Prime command entry point.
  *
  * Gathers project state and outputs context to stdout for injection
- * into Claude Code's context.
+ * into the AI agent's context.
  *
  * @param args - CLI arguments after "prime" subcommand
  */
@@ -264,7 +264,7 @@ async function outputAgentContext(
 	if (boundSession) {
 		sections.push("\n## Activation");
 		sections.push(`You have a bound task: **${boundSession.beadId}**`);
-		sections.push("Read your overlay at `.claude/CLAUDE.md` and begin working immediately.");
+		sections.push("Read your overlay at `.claude/CLAUDE.md` (or `.kimi/KIMI.md` for Kimi) and begin working immediately.");
 		sections.push("Do not wait for dispatch mail. Your assignment was bound at spawn time.");
 	}
 
