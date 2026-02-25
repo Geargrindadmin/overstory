@@ -49,6 +49,9 @@ const NATIVE_TEAM_TOOLS = [
 /** Tools that non-implementation agents must not use. */
 const WRITE_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
+/** Interactive tools that require human input. */
+const INTERACTIVE_TOOLS = ["AskHuman", "AskHumanConfirm", "AskHumanSelect"];
+
 /**
  * Bash commands that modify files and must be blocked for non-implementation agents.
  * Each pattern is a regex fragment used inside a grep -qE check.

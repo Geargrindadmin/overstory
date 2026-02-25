@@ -213,6 +213,10 @@ beforeEach(async () => {
 	// if a prior test's tempDir was already cleaned up.
 	process.chdir(originalCwd);
 
+	// Set fake API keys for AI provider tests
+	process.env.ANTHROPIC_API_KEY = "fake-api-key-for-testing";
+	process.env.KIMI_API_KEY = "fake-api-key-for-testing";
+
 	tempDir = await realpath(await createTempGitRepo());
 	overstoryDir = join(tempDir, ".overstory");
 	await mkdir(overstoryDir, { recursive: true });
@@ -226,6 +230,9 @@ beforeEach(async () => {
 			"  name: test-project",
 			`  root: ${tempDir}`,
 			"  canonicalBranch: main",
+			"aiprovider:",
+			"  type: claude",
+			"  allowFallback: false",
 			"watchdog:",
 			"  tier2Enabled: true",
 		].join("\n"),
