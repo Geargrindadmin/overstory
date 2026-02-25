@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { AgentError } from "../errors.ts";
-import type { OverlayConfig, QualityGate } from "../types.ts";
+import type { AIProviderType, OverlayConfig, QualityGate } from "../types.ts";
 
 /**
  * Resolve the path to the overlay template file.
@@ -255,8 +255,27 @@ export function isCanonicalRoot(dir: string, canonicalRoot: string): boolean {
 }
 
 /**
- * Generate the overlay and write it to `{worktreePath}/.claude/CLAUDE.md`.
- * Creates the `.claude/` directory if it does not exist.
+ * Get the config directory and instructions file name based on AI provider.
+ */
+function getProviderConfig(provider: AIProviderType): {
+	configDir: string;
+	instructionsFile: string;
+} {
+	switch (provider) {
+		case "kimi":
+			return { configDir: ".kimi", instructionsFile: "KIMI.md" };
+		case "claude":
+		default:
+			return { configDir: ".claude", instructionsFile: "CLAUDE.md" };
+	}
+}
+
+/**
+ * Generate the overlay and write it to the provider-specific config directory.
+ * For Claude: `{worktreePath}/.claude/CLAUDE.md`
+ * For Kimi: `{worktreePath}/.kimi/KIMI.md`
+ *
+ * Creates the config directory if it does not exist.
  *
  * Includes a safety guard that prevents writing to the canonical project root.
  * Agent overlays belong in worktrees, never at the orchestrator's root.
@@ -264,6 +283,7 @@ export function isCanonicalRoot(dir: string, canonicalRoot: string): boolean {
  * @param worktreePath - Absolute path to the agent's git worktree
  * @param config - The overlay configuration for this agent/task
  * @param canonicalRoot - Absolute path to the canonical project root (for guard check)
+ * @param provider - The AI provider type (claude or kimi), defaults to claude
  * @throws {AgentError} If worktreePath is the canonical project root, or if
  *   the directory cannot be created or the file cannot be written
  */
@@ -271,27 +291,29 @@ export async function writeOverlay(
 	worktreePath: string,
 	config: OverlayConfig,
 	canonicalRoot: string,
+	provider: AIProviderType = "claude",
 ): Promise<void> {
 	// Guard: never write agent overlays to the canonical project root.
-	// The project root's .claude/CLAUDE.md belongs to the orchestrator/user.
+	// The project root's config file belongs to the orchestrator/user.
 	// Uses path comparison instead of file-existence heuristic to handle
 	// dogfooding scenarios where .overstory/config.yaml is tracked in git
 	// and appears in every worktree checkout (overstory-p4st).
 	if (isCanonicalRoot(worktreePath, canonicalRoot)) {
 		throw new AgentError(
-			`Refusing to write overlay to canonical project root: ${worktreePath}. Agent overlays must target a worktree, not the orchestrator's root directory. This prevents overwriting the user's .claude/CLAUDE.md.`,
+			`Refusing to write overlay to canonical project root: ${worktreePath}. Agent overlays must target a worktree, not the orchestrator's root directory.`,
 			{ agentName: config.agentName },
 		);
 	}
 
 	const content = await generateOverlay(config);
-	const claudeDir = join(worktreePath, ".claude");
-	const outputPath = join(claudeDir, "CLAUDE.md");
+	const { configDir: configDirName, instructionsFile } = getProviderConfig(provider);
+	const configDir = join(worktreePath, configDirName);
+	const outputPath = join(configDir, instructionsFile);
 
 	try {
-		await mkdir(claudeDir, { recursive: true });
+		await mkdir(configDir, { recursive: true });
 	} catch (err) {
-		throw new AgentError(`Failed to create .claude/ directory at: ${claudeDir}`, {
+		throw new AgentError(`Failed to create ${configDirName}/ directory at: ${configDir}`, {
 			agentName: config.agentName,
 			cause: err instanceof Error ? err : undefined,
 		});

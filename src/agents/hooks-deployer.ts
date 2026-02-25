@@ -605,3 +605,166 @@ export async function deployHooks(
 		});
 	}
 }
+
+
+/**
+ * Deploy configuration for AI providers that don't support hooks (like Kimi).
+ *
+ * For providers without native hook support, this creates:
+ * 1. A configuration directory for the provider (.kimi/)
+ * 2. A constraints documentation file explaining guardrails
+ * 3. A simple metadata file for overstory tracking
+ *
+ * This is a fallback for providers like Kimi that don't have PreToolUse hooks.
+ * Agents must self-enforce constraints based on the documentation.
+ *
+ * @param worktreePath - Absolute path to the agent's git worktree
+ * @param agentName - The unique name of the agent
+ * @param capability - Agent capability (builder, scout, reviewer, lead, merger)
+ * @param provider - The AI provider type (kimi, etc.)
+ * @throws {AgentError} If the config cannot be written
+ */
+export async function deployHooksForProvider(
+	worktreePath: string,
+	agentName: string,
+	capability = "builder",
+	provider: "claude" | "kimi" | "auto",
+): Promise<void> {
+	// Determine config directory based on provider
+	const configDirName = provider === "kimi" ? ".kimi" : `.${provider}`;
+	const configDir = join(worktreePath, configDirName);
+
+	try {
+		await mkdir(configDir, { recursive: true });
+	} catch (err) {
+		throw new AgentError(`Failed to create ${configDirName}/ directory at: ${configDir}`, {
+			agentName,
+			cause: err instanceof Error ? err : undefined,
+		});
+	}
+
+	// Build constraints documentation for providers without hooks
+	const constraintsDoc = buildConstraintsDoc(agentName, capability, provider);
+	const constraintsPath = join(configDir, "CONSTRAINTS.md");
+
+	try {
+		await Bun.write(constraintsPath, constraintsDoc);
+	} catch (err) {
+		throw new AgentError(`Failed to write constraints to: ${constraintsPath}`, {
+			agentName,
+			cause: err instanceof Error ? err : undefined,
+		});
+	}
+
+	// Write a simple metadata file for overstory tracking
+	const metadata = {
+		agentName,
+		capability,
+		provider,
+		deployedAt: new Date().toISOString(),
+		hooksSupported: false,
+	};
+	const metadataPath = join(configDir, "overstory.json");
+
+	try {
+		await Bun.write(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+	} catch (err) {
+		throw new AgentError(`Failed to write metadata to: ${metadataPath}`, {
+			agentName,
+			cause: err instanceof Error ? err : undefined,
+		});
+	}
+}
+
+/**
+ * Build a constraints documentation file for providers without hook support.
+ *
+ * This document explains the guardrails that agents must self-enforce.
+ */
+function buildConstraintsDoc(
+	agentName: string,
+	capability: string,
+	provider: "claude" | "kimi" | "auto",
+): string {
+	const isNonImplementation = NON_IMPLEMENTATION_CAPABILITIES.has(capability);
+	const isCoordination = COORDINATION_CAPABILITIES.has(capability);
+
+	let doc = `# Agent Constraints for ${provider.toUpperCase()}\n\n`;
+	doc += `**Agent Name:** ${agentName}\n\n`;
+	doc += `**Capability:** ${capability}\n\n`;
+	doc += `**Provider:** ${provider}\n\n`;
+	doc += `---\n\n`;
+	doc += `## ⚠️ IMPORTANT: Self-Enforced Constraints\n\n`;
+	doc += `This AI provider (${provider}) does not support automated PreToolUse hooks. `;
+	doc += `You MUST self-enforce the following constraints:\n\n`;
+
+	// File modification constraints
+	if (isNonImplementation) {
+		doc += `## File Modification Constraints\n\n`;
+		doc += `**You are a ${capability} agent. You CANNOT modify files.**\n\n`;
+		doc += `DO NOT use these tools:\n`;
+		for (const tool of WRITE_TOOLS) {
+			doc += `- ${tool}\n`;
+		}
+		doc += `\nDO NOT run these Bash commands:\n`;
+		doc += `- sed -i (in-place editing)\n`;
+		doc += `- echo ... > file (redirects to files)\n`;
+		doc += `- mv, cp, rm (file operations)\n`;
+		doc += `- mkdir, touch, chmod, chown\n`;
+		doc += `\n`;
+	} else {
+		doc += `## File Modification Guidelines\n\n`;
+		doc += `**You are a ${capability} agent. You CAN modify files within your worktree.**\n\n`;
+		doc += `Rules:\n`;
+		doc += `- Only modify files within your assigned worktree\n`;
+		doc += `- Never write to files outside your worktree boundary\n`;
+		doc += `- Use relative paths or absolute paths starting with your worktree\n`;
+		doc += `\n`;
+	}
+
+	// Git constraints
+	doc += `## Git Constraints\n\n`;
+	doc += `**FORBIDDEN:**\n`;
+	doc += `- \`git push\` — Never push to remote repositories\n`;
+	doc += `- \`git reset --hard\` — Never destroy uncommitted work\n`;
+	doc += `- \`git checkout -b\` without the proper naming convention\n`;
+	doc += `\n`;
+	doc += `**Required branch naming:**\n`;
+	doc += `- Format: \`overstory/${agentName}/{task-id}\`\n`;
+	doc += `\n`;
+
+	if (isCoordination) {
+		doc += `**ALLOWED for coordination:**\n`;
+		doc += `- \`git add\` — Stage changes for beads/mulch sync\n`;
+		doc += `- \`git commit\` — Commit metadata changes\n`;
+		doc += `\n`;
+	}
+
+	// Tool constraints
+	doc += `## Tool Constraints\n\n`;
+	doc += `**FORBIDDEN tools (use overstory sling instead):**\n`;
+	for (const tool of NATIVE_TEAM_TOOLS) {
+		doc += `- ${tool}\n`;
+	}
+	doc += `\n`;
+	doc += `**Interactive tools (require human input):**\n`;
+	for (const tool of INTERACTIVE_TOOLS) {
+		doc += `- ${tool} — Use \`overstory mail --type question\` instead\n`;
+	}
+	doc += `\n`;
+
+	// Communication reminder
+	doc += `## Communication\n\n`;
+	doc += `Since ${provider} doesn't have automatic mail checking, YOU must manually check mail:\n`;
+	doc += `\`\`\`bash\n`;
+	doc += `# Check your inbox regularly\n`;
+	doc += `overstory mail check --agent ${agentName}\n`;
+	doc += `\`\`\`\n\n`;
+
+	// Footer
+	doc += `---\n\n`;
+	doc += `Violations of these constraints will be detected by the watchdog system `;
+	doc += `and may result in agent termination.\n`;
+
+	return doc;
+}

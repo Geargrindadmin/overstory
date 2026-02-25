@@ -1,10 +1,15 @@
 // === Model & Provider Types ===
 
 /** Backward-compatible model alias for Anthropic models. */
-export type ModelAlias = "sonnet" | "opus" | "haiku";
+export type ModelAlias = "sonnet" | "opus" | "haiku" | "kimi-k2.5";
 
 /**
- * A model reference: either a simple alias ('sonnet') or a provider-qualified
+ * AI Provider types supported by Overstory.
+ */
+export type AIProviderType = "claude" | "kimi" | "auto";
+
+/**
+ * A model reference: either a simple alias ('sonnet', 'kimi-k2.5') or a provider-qualified
  * string ('provider/model', e.g. 'openrouter/openai/gpt-5.3').
  */
 export type ModelRef = ModelAlias | (string & {});
@@ -16,10 +21,47 @@ export interface ProviderConfig {
 	authTokenEnv?: string;
 }
 
+/** AI Provider configuration for agent spawning. */
+export interface AIProviderConfig {
+	/** The AI provider type - claude, kimi, or auto-detect */
+	type: AIProviderType;
+	/** Preferred provider when type is 'auto' - defaults to claude if available */
+	preferred?: "claude" | "kimi";
+	/** Whether to allow fallback to the other provider if preferred is unavailable */
+	allowFallback: boolean;
+}
+
+/** CLI command configuration for spawning agents. */
+export interface AgentCLIConfig {
+	/** The CLI command name (e.g., 'claude', 'kimi') */
+	command: string;
+	/** Model flag format (e.g., '--model', or null for kimi) */
+	modelFlag: string | null;
+	/** Skip permissions flag (e.g., '--dangerously-skip-permissions', or null) */
+	skipPermissionsFlag: string | null;
+	/** Environment variable name for API key */
+	apiKeyEnvVar: string;
+	/** Configuration directory name (e.g., '.claude', '.kimi') */
+	configDir: string;
+	/** Instructions file name (e.g., 'CLAUDE.md', 'KIMI.md') */
+	instructionsFile: string;
+	/** Settings file path relative to configDir */
+	settingsFile: string | null;
+	/** Whether this provider supports hooks/settings.local.json */
+	supportsHooks: boolean;
+}
+
 /** Resolved model with optional provider environment variables. */
 export interface ResolvedModel {
 	model: string;
 	env?: Record<string, string>;
+}
+
+/** Resolved AI provider with CLI configuration. */
+export interface ResolvedAIProvider {
+	provider: AIProviderType;
+	cliConfig: AgentCLIConfig;
+	model: string;
 }
 
 // === Task Tracker ===
@@ -71,6 +113,8 @@ export interface OverstoryConfig {
 		reimagineEnabled: boolean;
 	};
 	providers: Record<string, ProviderConfig>;
+	/** AI Provider configuration for agent spawning (Claude Code vs Kimi Code) */
+	aiprovider: AIProviderConfig;
 	watchdog: {
 		tier0Enabled: boolean; // Tier 0: Mechanical daemon (heartbeat, tmux/pid liveness)
 		tier0IntervalMs: number; // Default 30_000

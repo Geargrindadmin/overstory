@@ -46,6 +46,11 @@ export const DEFAULT_CONFIG: OverstoryConfig = {
 	},
 	providers: {
 		anthropic: { type: "native" },
+		kimi: { type: "native", authTokenEnv: "KIMI_API_KEY" },
+	},
+	aiprovider: {
+		type: "auto",
+		allowFallback: true,
 	},
 	watchdog: {
 		tier0Enabled: true, // Tier 0: Mechanical daemon
@@ -584,6 +589,30 @@ function validateConfig(config: OverstoryConfig): void {
 		}
 	}
 
+	// aiprovider: validate configuration
+	const validAIProviderTypes = ["auto", "claude", "kimi"] as const;
+	if (!validAIProviderTypes.includes(config.aiprovider.type as (typeof validAIProviderTypes)[number])) {
+		throw new ValidationError(
+			`aiprovider.type must be one of: ${validAIProviderTypes.join(", ")}`,
+			{
+				field: "aiprovider.type",
+				value: config.aiprovider.type,
+			},
+		);
+	}
+	if (config.aiprovider.preferred !== undefined) {
+		const validPreferences = ["claude", "kimi"] as const;
+		if (!validPreferences.includes(config.aiprovider.preferred)) {
+			throw new ValidationError(
+				`aiprovider.preferred must be one of: ${validPreferences.join(", ")}`,
+				{
+					field: "aiprovider.preferred",
+					value: config.aiprovider.preferred,
+				},
+			);
+		}
+	}
+
 	// qualityGates: if present, validate each entry
 	if (config.project.qualityGates) {
 		for (let i = 0; i < config.project.qualityGates.length; i++) {
@@ -614,7 +643,7 @@ function validateConfig(config: OverstoryConfig): void {
 	}
 
 	// models: validate each value — accepts aliases and provider-prefixed refs
-	const validAliases = ["sonnet", "opus", "haiku"];
+	const validAliases = ["sonnet", "opus", "haiku", "kimi-k2.5"];
 	const toolHeavyRoles = ["builder", "scout"];
 	for (const [role, model] of Object.entries(config.models)) {
 		if (model === undefined) continue;

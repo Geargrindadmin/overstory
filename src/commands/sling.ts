@@ -20,7 +20,12 @@
 
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { deployHooks } from "../agents/hooks-deployer.ts";
+import {
+	buildSpawnCommand,
+	getProviderEnv,
+	resolveAIProvider,
+} from "../aiprovider.ts";
+import { deployHooks, deployHooksForProvider } from "../agents/hooks-deployer.ts";
 import { createIdentity, loadIdentity } from "../agents/identity.ts";
 import { createManifestLoader, resolveModel } from "../agents/manifest.ts";
 import { writeOverlay } from "../agents/overlay.ts";
@@ -525,7 +530,7 @@ export async function slingCommand(args: string[]): Promise<void> {
 		};
 
 		try {
-			await writeOverlay(worktreePath, overlayConfig, config.project.root);
+			await writeOverlay(worktreePath, overlayConfig, config.project.root, aiProvider.provider);
 		} catch (err) {
 			// Clean up the orphaned worktree created in step 7 (overstory-p4st)
 			try {
@@ -542,7 +547,13 @@ export async function slingCommand(args: string[]): Promise<void> {
 		}
 
 		// 9. Deploy hooks config (capability-specific guards)
-		await deployHooks(worktreePath, name, capability);
+		// Only deploy hooks if the provider supports them (Claude Code)
+		if (aiProvider.cliConfig.supportsHooks) {
+			await deployHooks(worktreePath, name, capability);
+		} else {
+			// For providers without hooks (Kimi), deploy a minimal config or documentation
+			await deployHooksForProvider(worktreePath, name, capability, aiProvider.provider);
+		}
 
 		// 10. Claim tracker issue
 		if (config.taskTracker.enabled && !skipTaskCheck) {
@@ -567,15 +578,37 @@ export async function slingCommand(args: string[]): Promise<void> {
 			});
 		}
 
-		// 12. Create tmux session running claude in interactive mode
+		// 12. Resolve AI provider and create tmux session
+		const aiProvider = await resolveAIProvider(config.aiprovider);
 		const tmuxSessionName = `overstory-${config.project.name}-${name}`;
-		const { model, env } = resolveModel(config, manifest, capability, agentDef.model);
-		const claudeCmd = `claude --model ${model} --dangerously-skip-permissions`;
-		const pid = await createSession(tmuxSessionName, worktreePath, claudeCmd, {
-			...env,
+		
+		// Resolve model - use provider default or manifest override
+		const { model: resolvedModel, env: modelEnv } = resolveModel(
+			config,
+			manifest,
+			capability,
+			agentDef.model,
+		);
+		
+		// Use resolved model if it's not a provider alias, otherwise use provider default
+		const modelToUse =
+			resolvedModel === "sonnet" || resolvedModel === "opus" || resolvedModel === "haiku"
+				? resolvedModel
+				: aiProvider.model;
+		
+		// Build the spawn command using provider-specific config
+		const spawnCmd = buildSpawnCommand(aiProvider.cliConfig, modelToUse);
+		
+		// Merge environment variables from model resolution and provider
+		const sessionEnv = {
+			...modelEnv,
+			...getProviderEnv(aiProvider.cliConfig),
 			OVERSTORY_AGENT_NAME: name,
 			OVERSTORY_WORKTREE_PATH: worktreePath,
-		});
+			OVERSTORY_AI_PROVIDER: aiProvider.provider,
+		};
+		
+		const pid = await createSession(tmuxSessionName, worktreePath, spawnCmd, sessionEnv);
 
 		// 13. Record session BEFORE sending the beacon so that hook-triggered
 		// updateLastActivity() can find the entry and transition booting->working.
