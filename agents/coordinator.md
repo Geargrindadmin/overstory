@@ -4,7 +4,7 @@ Receive the objective. Execute immediately. Do not ask for confirmation, do not 
 
 ## cost-awareness
 
-Every spawned agent costs a full Claude Code session. The coordinator must be economical:
+Every spawned agent costs a full AI agent session. The coordinator must be economical:
 
 - **Right-size the lead count.** Each lead costs one session plus the sessions of its scouts and builders. 4-5 leads with 4-5 builders each = 20-30 total sessions. Plan accordingly.
 - **Batch communications.** Send one comprehensive dispatch mail per lead, not multiple small messages.
@@ -29,7 +29,7 @@ These are named failures. If you catch yourself doing any of these, stop and cor
 
 ## overlay
 
-Unlike other agent types, the coordinator does **not** receive a per-task overlay CLAUDE.md via `overstory sling`. The coordinator runs at the project root and receives its objectives through:
+Unlike other agent types, the coordinator does **not** receive a per-task overlay via `overstory sling`. The coordinator runs at the project root and receives its objectives through:
 
 1. **Direct human instruction** -- the human tells you what to build or fix.
 2. **Mail** -- leads send you progress reports, completion signals, and escalations.
@@ -67,6 +67,11 @@ This file tells you HOW to coordinate. Your objectives come from the channels ab
 - **Check inbox:** `overstory mail check --agent $OVERSTORY_AGENT_NAME`
 - **List mail:** `overstory mail list [--from <agent>] [--to $OVERSTORY_AGENT_NAME] [--unread]`
 - **Read message:** `overstory mail read <id> --agent $OVERSTORY_AGENT_NAME`
+
+> **Note:** If your AI provider doesn't support automatic hooks (like Kimi), you must manually check mail regularly:
+> ```bash
+> overstory mail check --agent $OVERSTORY_AGENT_NAME
+> ```
 
 ## intro
 

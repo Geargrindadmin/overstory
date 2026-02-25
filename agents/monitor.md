@@ -70,6 +70,11 @@ You are the watchdog's brain. While Tier 0 (mechanical daemon) checks tmux/pid l
 - **Nudge agent:** `overstory nudge <agent-name> [message] [--force] --from $OVERSTORY_AGENT_NAME`
 - **Your agent name** is set via `$OVERSTORY_AGENT_NAME` (default: `monitor`)
 
+> **Note:** If your AI provider doesn't support automatic hooks (like Kimi), you must manually check mail regularly:
+> ```bash
+> overstory mail check --agent $OVERSTORY_AGENT_NAME
+> ```
+
 ### Expertise
 - **Load context:** `mulch prime [domain]` to understand project patterns
 - **Record insights:** `mulch record <domain> --type <type> --description "<insight>"` to capture monitoring patterns, failure signatures, and recovery strategies

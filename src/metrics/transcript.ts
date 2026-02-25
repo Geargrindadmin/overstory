@@ -1,10 +1,9 @@
 /**
- * Parser for Claude Code transcript JSONL files.
+ * Parser for AI agent transcript JSONL files.
  *
- * Extracts token usage data from assistant-type entries in transcript files
- * at ~/.claude/projects/{project-slug}/{session-id}.jsonl.
+ * Supports both Claude Code and Kimi Code transcript formats.
  *
- * Each assistant entry contains per-turn usage:
+ * Claude Code format (at ~/.claude/projects/{project-slug}/{session-id}.jsonl):
  * {
  *   "type": "assistant",
  *   "message": {
@@ -14,6 +13,18 @@
  *       "output_tokens": 9,
  *       "cache_read_input_tokens": 19401,
  *       "cache_creation_input_tokens": 9918
+ *     }
+ *   }
+ * }
+ *
+ * Kimi Code format (may vary - this parser attempts to extract common fields):
+ * {
+ *   "type": "assistant",
+ *   "message": {
+ *     "model": "kimi-k2.5",
+ *     "usage": {
+ *       "input_tokens": 100,
+ *       "output_tokens": 50
  *     }
  *   }
  * }
@@ -35,8 +46,9 @@ interface ModelPricing {
 	cacheCreationPerMTok: number;
 }
 
-/** Hardcoded pricing for known Claude models. */
+/** Hardcoded pricing for known AI models (USD per million tokens). */
 const MODEL_PRICING: Record<string, ModelPricing> = {
+	// Claude models
 	opus: {
 		inputPerMTok: 15,
 		outputPerMTok: 75,
@@ -55,11 +67,18 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 		cacheReadPerMTok: 0.08, // 10% of input
 		cacheCreationPerMTok: 0.2, // 25% of input
 	},
+	// Kimi models (approximate pricing - update as needed)
+	"kimi-k2.5": {
+		inputPerMTok: 2,
+		outputPerMTok: 8,
+		cacheReadPerMTok: 0, // No caching in Kimi
+		cacheCreationPerMTok: 0,
+	},
 };
 
 /**
  * Determine the pricing tier for a given model string.
- * Matches on substring: "opus" -> opus pricing, "sonnet" -> sonnet, "haiku" -> haiku.
+ * Matches on substring: "opus" -> opus pricing, "sonnet" -> sonnet, "haiku" -> haiku, "kimi" -> kimi.
  * Returns null if unrecognized.
  */
 function getPricingForModel(model: string): ModelPricing | null {
@@ -67,6 +86,7 @@ function getPricingForModel(model: string): ModelPricing | null {
 	if (lower.includes("opus")) return MODEL_PRICING.opus ?? null;
 	if (lower.includes("sonnet")) return MODEL_PRICING.sonnet ?? null;
 	if (lower.includes("haiku")) return MODEL_PRICING.haiku ?? null;
+	if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"] ?? null;
 	return null;
 }
 
@@ -90,6 +110,7 @@ export function estimateCost(usage: TranscriptUsage): number | null {
 
 /**
  * Narrow an unknown value to determine if it looks like a transcript assistant entry.
+ * Supports both Claude and Kimi transcript formats.
  * Returns the usage fields if valid, or null otherwise.
  */
 function extractUsageFromEntry(entry: unknown): {
@@ -113,9 +134,20 @@ function extractUsageFromEntry(entry: unknown): {
 
 	const u = usage as Record<string, unknown>;
 
+	// Support both Claude and Kimi token field names
+	// Claude uses input_tokens/output_tokens, Kimi may use similar or different names
+	const inputTokens = 
+		typeof u.input_tokens === "number" ? u.input_tokens :
+		typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0;
+	
+	const outputTokens = 
+		typeof u.output_tokens === "number" ? u.output_tokens :
+		typeof u.completion_tokens === "number" ? u.completion_tokens : 0;
+
 	return {
-		inputTokens: typeof u.input_tokens === "number" ? u.input_tokens : 0,
-		outputTokens: typeof u.output_tokens === "number" ? u.output_tokens : 0,
+		inputTokens,
+		outputTokens,
+		// Kimi may not have caching, default to 0
 		cacheReadTokens: typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : 0,
 		cacheCreationTokens:
 			typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : 0,
@@ -124,8 +156,9 @@ function extractUsageFromEntry(entry: unknown): {
 }
 
 /**
- * Parse a Claude Code transcript JSONL file and aggregate token usage.
+ * Parse an AI agent transcript JSONL file and aggregate token usage.
  *
+ * Supports both Claude Code and Kimi Code transcript formats.
  * Reads the file line by line, extracting usage data from each assistant
  * entry. Returns aggregated totals and the model from the first assistant turn.
  *
